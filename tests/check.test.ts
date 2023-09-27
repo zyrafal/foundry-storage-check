@@ -146,6 +146,91 @@ describe("Storage layout checks", () => {
     });
   });
 
+  describe("Diamond storage", () => {
+    const srcLayout = parseLayout(
+      createLayout("tests/mocks/diamond/DiamondStorageRef.sol:DiamondStorage")
+    );
+
+    it("should not raise diff when changing name of struct", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageRenamed.sol:DiamondStorage";
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(0);
+    });
+
+    it("should not raise diff when extending struct", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageExtended.sol:DiamondStorage";
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(0);
+    });
+
+    it("should raise type diff when changing type of variable", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageChanged.sol:DiamondStorage";
+      const cmpDef = parseSource(contract);
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(1);
+      expect(formatDiff(cmpDef, diffs[0]).message).toEqual(
+        'variable "c" was of type "uint32" but is now "uint256" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000002, byte #0)'
+      );
+    });
+
+    it("should raise label diff when switching struct variables", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageInsertedInTheMiddle.sol:DiamondStorage";
+      const cmpDef = parseSource(contract);
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(3);
+      expect(formatDiff(cmpDef, diffs[0]).message).toEqual(
+        'variable \"c\" of type \"uint32\" was replaced by variable \"findMe\" of type \"bool\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000002, byte #0)'
+      );
+      expect(formatDiff(cmpDef, diffs[1]).message).toEqual(
+        'variable \"d\" was renamed to \"c\". Is it intentional? (storage slot 0x0000000000000000000000000000000000000000000000000000000000000003, byte #0)'
+      );
+      expect(formatDiff(cmpDef, diffs[2]).message).toEqual(
+        'variable \"e\" of type \"address\" was replaced by variable \"d\" of type \"uint32\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000004, byte #0)'
+      );
+    });
+
+    it("should raise label diff when inserting custom type struct variables", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageCustomType.sol:DiamondStorage";
+      const cmpDef = parseSource(contract);
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(3);
+      expect(formatDiff(cmpDef, diffs[0]).message).toEqual(
+        'variable \"c\" of type \"uint32\" was replaced by variable \"token\" of type \"Types.TokenType\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000002, byte #0)'
+      );
+      expect(formatDiff(cmpDef, diffs[1]).message).toEqual(
+        'variable \"d\" was renamed to \"c\". Is it intentional? (storage slot 0x0000000000000000000000000000000000000000000000000000000000000003, byte #0)'
+      );
+      expect(formatDiff(cmpDef, diffs[2]).message).toEqual(
+        'variable \"e\" of type \"address\" was replaced by variable \"d\" of type \"uint32\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000004, byte #0)'
+      );
+    });
+
+    it("should raise label diff when inserting mapping into struct variables", async () => {
+      const contract = "tests/mocks/diamond/DiamondStorageMapping.sol:DiamondStorage";
+      const cmpDef = parseSource(contract);
+      const cmpLayout = parseLayout(createLayout(contract));
+
+      const diffs = await checkLayouts(srcLayout, cmpLayout);
+      expect(diffs).toHaveLength(2);
+      expect(formatDiff(cmpDef, diffs[0]).message).toEqual(
+        'variable \"d\" of type \"uint32\" was replaced by variable \"share\" of type \"Mapping\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000003, byte #0)'
+      );
+      expect(formatDiff(cmpDef, diffs[1]).message).toEqual(
+        'variable \"e\" of type \"address\" was replaced by variable \"d\" of type \"uint32\" (storage slot 0x0000000000000000000000000000000000000000000000000000000000000004, byte #0)'
+      );
+    });
+  });
+
   describe("Mapping storage", () => {
     const srcLayout = parseLayout(
       createLayout("tests/mocks/mapping/StorageMappingRef.sol:Storage")

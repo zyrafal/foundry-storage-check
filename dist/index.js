@@ -372,6 +372,7 @@ const contract = core.getInput("contract");
 const address = core.getInput("address");
 const rpcUrl = core.getInput("rpcUrl");
 const failOnRemoval = core.getInput("failOnRemoval") === "true";
+const failOnLabelDiff = core.getInput("failOnLabelDiff") === "true";
 const workingDirectory = core.getInput("workingDirectory");
 const contractAbs = (0, path_1.join)(workingDirectory, contract);
 const contractEscaped = contractAbs.replace(/\//g, "_").replace(/:/g, "-");
@@ -469,6 +470,9 @@ async function _run() {
         if (formattedDiffs.filter((diff) => format_1.diffLevels[diff.type] === "error").length > 0 ||
             (failOnRemoval &&
                 formattedDiffs.filter((diff) => diff.type === types_1.StorageLayoutDiffType.VARIABLE_REMOVED)
+                    .length > 0) ||
+            (failOnLabelDiff &&
+                formattedDiffs.filter((diff) => diff.type === types_1.StorageLayoutDiffType.LABEL)
                     .length > 0))
             throw Error("Unsafe storage layout changes detected. Please see above for details.");
     }
@@ -527,6 +531,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseSource = exports.parseLayout = exports.createLayout = void 0;
 const child_process_1 = __nccwpck_require__(2081);
 const fs_1 = __importDefault(__nccwpck_require__(7147));
+const path_1 = __importDefault(__nccwpck_require__(1017));
 const shell_quote_1 = __nccwpck_require__(7029);
 const parser = __importStar(__nccwpck_require__(4834));
 const exactify = (variable) => ({
@@ -535,10 +540,61 @@ const exactify = (variable) => ({
     offset: BigInt(variable.offset),
 });
 const createLayout = (contract, cwd = ".") => {
-    return (0, child_process_1.execSync)((0, shell_quote_1.quote)(["forge", "inspect", contract, "storage-layout"]), {
+    const [contractPath, contractName] = contract.split(":");
+    const { children, tokens = [] } = parser.parse(fs_1.default.readFileSync(path_1.default.join(cwd, contractPath), { encoding: "utf-8" }), {
+        tolerant: true,
+        tokens: true,
+        loc: true,
+    });
+    // check if contract is a diamond library, otherwise return default storage layout
+    const def = children.find((child) => child.type === "ContractDefinition" && child.name === contractName);
+    if (def) {
+        // find all functions in the contract
+        const contractFunctions = def.subNodes.filter((child) => child.type === "FunctionDefinition");
+        // find all structs in the contract
+        const contractStructs = def.subNodes.filter((child) => child.type === "StructDefinition");
+        // has diamond storage if there is a function that returns a pointer to storage struct
+        const hasDiamondStorage = contractFunctions.find((f) => f.returnParameters && f.returnParameters[0].storageLocation === "storage");
+        if (hasDiamondStorage && hasDiamondStorage.returnParameters) {
+            const diamondStruct = hasDiamondStorage.returnParameters[0];
+            if (diamondStruct.typeName) {
+                const v = diamondStruct.typeName;
+                const diamondStorageStructName = v.namePath;
+                // find the diamond storage struct
+                const diamondStorageStruct = contractStructs.find((s) => s.name === diamondStorageStructName);
+                // create storage layout from AST and return
+                let diamondStorageLayout = { storage: [], types: {} };
+                if (diamondStorageStruct) {
+                    let slot = 0;
+                    diamondStorageStruct.members.forEach(function (v) {
+                        const member = {
+                            astId: 0,
+                            contract: contract,
+                            label: v.name || "",
+                            offset: 0,
+                            slot: String(slot),
+                            type: (v.typeName).name || (v.typeName).namePath || (v.typeName).type
+                        };
+                        diamondStorageLayout.storage.push(member);
+                        const memberType = {
+                            encoding: "inplace",
+                            label: member.type,
+                            numberOfBytes: "1"
+                        };
+                        diamondStorageLayout.types[member.type] = memberType;
+                        slot++;
+                    });
+                    return JSON.stringify(diamondStorageLayout);
+                }
+            }
+        }
+    }
+    ;
+    const sl = (0, child_process_1.execSync)((0, shell_quote_1.quote)(["forge", "inspect", contract, "storage-layout"]), {
         encoding: "utf-8",
         cwd,
     });
+    return sl;
 };
 exports.createLayout = createLayout;
 const parseLayout = (content) => {
